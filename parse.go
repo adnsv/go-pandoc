@@ -3,6 +3,7 @@ package pandoc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -484,6 +485,7 @@ func loadColSpecs(raw interface{}) (cc []*ColSpec, e error) {
 		if !ok || len(t) != 2 {
 			return nil, fmt.Errorf("Table invalid ColSpec[%d] > %s", idx, e)
 		}
+
 		m, ok := t[0].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Table invalid ColSpec[%d] > %s", idx, e)
@@ -558,10 +560,103 @@ func loadTableBody(raw interface{}) (b *TableBody, e error) {
 
 func loadTable(raw interface{}) (t *Table, e error) {
 	ii, ok := raw.([]interface{})
-	if !ok || len(ii) != 6 {
+	if !ok || (len(ii) != 5 && len(ii) != 6) {
 		return nil, fmt.Errorf("invalid Table")
 	}
+
+	oldFormat := len(ii) == 5
+
+	// old format:
+	// Table [Inline] [Alignment] [Double] [TableCell] [[TableCell]]
+	// Table, with caption, column alignments (required), relative column widths (0 = default), column headers (each a list of blocks), and rows (each a list of lists of blocks)
+	//
+	// new format:
+	// Table Attr Caption [ColSpec] TableHead [TableBody] TableFoot
+	// Table, with attributes, caption, optional short caption, column alignments and widths (required), table head, table bodies, and table foot
+	// Caption (Maybe ShortCaption) [Block]
+
 	t = &Table{}
+
+	if oldFormat {
+		// caption:
+		var c InlineList
+		c, e = loadInlineSlice(ii[0])
+		if e != nil {
+			return nil, fmt.Errorf("inline caption > %s", e)
+		}
+		t.Caption = append(t.Caption, &Plain{Inlines: c})
+
+		// alignments:
+		aa, ok := ii[1].([]interface{})
+		if !ok {
+			return nil, errors.New("invalid column aligments")
+		}
+		for i, a := range aa {
+			v, e := loadTString(a)
+			if e != nil {
+				return nil, fmt.Errorf("invalid column alignment[%d]", i)
+			}
+			t.ColSpecs = append(t.ColSpecs, &ColSpec{Alignment: v})
+		}
+
+		// widths
+		ww, ok := ii[2].([]interface{})
+		if !ok {
+			return nil, errors.New("invalid column widths")
+		}
+		if len(ww) != len(t.ColSpecs) {
+			return nil, errors.New("invalid column widths")
+		}
+		for i, w := range ww {
+			v, ok := w.(float64)
+			if !ok {
+				return nil, fmt.Errorf("invalid column width[%d]", i)
+			}
+			t.ColSpecs[i].ColWidth = float32(v)
+		}
+
+		loadTableCells := func(i interface{}) (*Row, error) {
+			var bb = []BlockList{}
+			bb, e = loadBlockSliceSlice(ii[3])
+			if e != nil {
+				return nil, fmt.Errorf(".Table header > %s", e)
+			}
+			r := &Row{}
+			for _, b := range bb {
+				r.Cells = append(r.Cells, &Cell{Blocks: b})
+			}
+			return r, nil
+		}
+
+		// head
+		r := &Row{}
+		r, e = loadTableCells(ii[3])
+		if e != nil {
+			return nil, fmt.Errorf(".Table header > %s", e)
+		}
+		t.Head.Rows = append(t.Head.Rows, r)
+
+		// body
+		var rr = []*Row{}
+		iii, ok := ii[4].([]interface{})
+		if !ok {
+			return nil, errors.New("invalid table body")
+		}
+		for i, rowi := range iii {
+			r, e = loadTableCells(rowi)
+			if e != nil {
+				return nil, fmt.Errorf(".Table body[%d] > %s", i, e)
+			}
+			rr = append(rr, r)
+		}
+
+		t.Bodies = append(t.Bodies, &TableBody{
+			Rows2: rr,
+		})
+
+		return
+	}
+
 	t.Attr, e = loadAttr(ii[0])
 	if e != nil {
 		return nil, fmt.Errorf(".Attr > %s", e)
