@@ -61,12 +61,20 @@ func (d *Document) ParseMeta() map[string]string {
 	return ret
 }
 
-func loadInt(raw interface{}) (i int, e error) {
+func loadInt(raw interface{}) (int, error) {
 	f, ok := raw.(float64)
 	if !ok {
 		return 0, fmt.Errorf("invalid int")
 	}
 	return int(f), nil
+}
+
+func loadFloat(raw interface{}) (float32, error) {
+	f, ok := raw.(float64)
+	if !ok {
+		return 0, fmt.Errorf("invalid int")
+	}
+	return float32(f), nil
 }
 
 func loadString(raw interface{}) (s string, e error) {
@@ -496,7 +504,26 @@ func loadColSpecs(raw interface{}) (cc []*ColSpec, e error) {
 		if e != nil {
 			return nil, fmt.Errorf("Table invalid ColSpec[%d].Align > %s", idx, e)
 		}
-		// ignore width until we figure out if and how we deal with it
+
+		// width
+		m, ok = t[1].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Table invalid ColSpec[%d] > %s", idx, e)
+		}
+		tc, e := loadTC(m)
+		if e != nil {
+			return nil, fmt.Errorf("Table invalid ColSpec[%d].Width > %s", idx, e)
+		}
+		if tc.T == "ColWidthDefault" {
+			c.ColWidth = 0.0
+		} else if tc.T == "ColWidth" {
+			c.ColWidth, e = loadFloat(tc.C)
+			if e != nil {
+				return nil, fmt.Errorf("Table invalid ColSpec[%d].Width > %s", idx, e)
+			}
+		} else {
+			return nil, fmt.Errorf("Table invalid ColSpec[%d].Width type %s", idx, tc.T)
+		}
 	}
 	return
 }

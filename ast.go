@@ -183,8 +183,6 @@ type Formatted struct {
 	Content InlineList
 }
 
-type QuoteType int
-
 type Quoted struct {
 	QuoteType string // SingleQuote or DoubleQuote
 	Content   InlineList
