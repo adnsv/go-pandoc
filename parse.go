@@ -7,19 +7,25 @@ import (
 	"fmt"
 )
 
-// see https://hackage.haskell.org/package/pandoc-types-1.22/docs/Text-Pandoc-Definition.html
+// Pandoc AST types are based on:
+// https://hackage.haskell.org/package/pandoc-types-1.23.1/docs/Text-Pandoc-Definition.html
 
+// Document represents a Pandoc JSON document with API version, metadata, and blocks.
 type Document struct {
-	PandocApiVersion json.RawMessage        `json:"pandoc-api-version"`
-	Meta             map[string]interface{} `json:"meta"`
-	Blocks           []interface{}          `json:"blocks"`
+	PandocApiVersion json.RawMessage        `json:"pandoc-api-version"` // Pandoc API version
+	Meta             map[string]interface{} `json:"meta"`               // Document metadata
+	Blocks           []interface{}          `json:"blocks"`             // Top-level blocks
 }
 
+// TC represents a tagged container with type (T) and content (C) fields.
+// This is Pandoc's standard format for encoding AST elements in JSON.
 type TC struct {
-	T string      `json:"t"`
-	C interface{} `json:"c"`
+	T string      `json:"t"` // Type tag
+	C interface{} `json:"c"` // Content
 }
 
+// NewDocument parses Pandoc JSON output into a Document structure.
+// The buf parameter should contain JSON output from `pandoc -t json`.
 func NewDocument(buf []byte) (*Document, error) {
 	doc := &Document{}
 	err := json.Unmarshal(buf, doc)
@@ -29,6 +35,8 @@ func NewDocument(buf []byte) (*Document, error) {
 	return doc, nil
 }
 
+// ParseMeta extracts metadata from the document as a map of strings.
+// It converts MetaInlines metadata values to plain text strings.
 func (d *Document) ParseMeta() map[string]string {
 	ret := map[string]string{}
 	for k, r := range d.Meta {
@@ -735,6 +743,43 @@ func loadTable(raw interface{}) (t *Table, e error) {
 	return
 }
 
+func loadFigure(raw interface{}) (f *Figure, e error) {
+	ii, ok := raw.([]interface{})
+	if !ok || len(ii) != 3 {
+		return nil, fmt.Errorf("invalid Figure")
+	}
+
+	f = &Figure{}
+
+	f.Attr, e = loadAttr(ii[0])
+	if e != nil {
+		return nil, fmt.Errorf(".Attr > %s", e)
+	}
+
+	// Caption: [Maybe ShortCaption, [Block]]
+	cc, ok := ii[1].([]interface{})
+	if !ok || len(cc) != 2 {
+		return nil, fmt.Errorf(".Caption > %s", e)
+	}
+	if cc[0] != nil {
+		f.ShortCaption, e = loadInlineSlice(cc[0])
+		if e != nil {
+			return nil, fmt.Errorf(".ShortCaption > %s", e)
+		}
+	}
+	f.Caption, e = loadBlockSlice(cc[1])
+	if e != nil {
+		return nil, fmt.Errorf(".Caption > %s", e)
+	}
+
+	f.Blocks, e = loadBlockSlice(ii[2])
+	if e != nil {
+		return nil, fmt.Errorf(".Blocks > %s", e)
+	}
+
+	return
+}
+
 func loadBlock(tc *TC) (b Block, e error) {
 	switch tc.T {
 	case "Plain":
@@ -761,6 +806,8 @@ func loadBlock(tc *TC) (b Block, e error) {
 		b, e = &HorizontalRule{}, nil
 	case "Table":
 		b, e = loadTable(tc.C)
+	case "Figure":
+		b, e = loadFigure(tc.C)
 	case "Div":
 		b, e = loadDiv(tc.C)
 	case "Null":
@@ -1046,6 +1093,8 @@ func loadInlineSlice(raw interface{}) (ll InlineList, e error) {
 	return
 }
 
+// Flow parses and returns the document's block content as a BlockList.
+// This extracts the main document flow, converting raw JSON blocks into typed Block elements.
 func (d *Document) Flow() (bb BlockList, e error) {
 	bb, e = loadBlockSlice(d.Blocks)
 	return
