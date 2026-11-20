@@ -1005,9 +1005,10 @@ func loadNote(raw interface{}) (n *Note, e error) {
 }
 
 func loadSpan(raw interface{}) (s *Span, e error) {
+	// Span is [Attr, [Inline]]
 	ii, ok := raw.([]interface{})
-	if !ok || len(ii) != 3 {
-		return nil, fmt.Errorf("invalid Image")
+	if !ok || len(ii) != 2 {
+		return nil, fmt.Errorf("invalid Span")
 	}
 	s = &Span{}
 	s.Attr, e = loadAttr(ii[0])
